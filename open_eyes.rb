@@ -14,7 +14,7 @@ class OpenEyes < Processing::App
   S_tile = Struct.new(:x, :y, :z, :path)
   
   def setup 
-    size 1024, 768, OPENGL
+    size 1024, 768#, OPENGL
     @zoom = 7
     @start_loc = latlon2loc( 15.640891, 32.485199, @zoom, true )
     puts @start_loc
@@ -28,30 +28,31 @@ class OpenEyes < Processing::App
     for lvl in ( lvl_start..lvl_end )
       @list[lvl] = get_files(lvl)
     end
-    @drawQueue = Array.new
+    @drawQueue = Array.new(10)
     puts @drawQueue
     load_tiles(@zoom)
     #puts @list[8]
   end
   
-  def load_tiles(zoom)
-    if @tiles
-      tiles = nil
-    end
-    @tiles = Array.new
+  def load_tiles(lvl)
+    puts @list[lvl]
+    @drawQueue[lvl]=nil
     if(zoom = 7||8)
-      for s in @list[zoom]
+      @drawQueue[lvl]=Array.new
+      for s in @list[lvl]
+        puts s
         t = Tile.new(s.x, s.y, s.z, s.path)
-        @drawQueue.push(t)
+        @drawQueue[lvl].push(t)
       end
     end
+    puts @drawQueue
   end
   
   def get_files(lvl)
 	  list = Array.new
 	  dir = "data/tiles/"<<lvl.to_s
 	  Dir.foreach(dir) do |entry|
-	    if (entry.length > 3)
+	    if (entry.length > 10)
   	     arr = entry.split(/x|y|z|.png/)
          arr.shift
          arr.push(entry)
@@ -112,12 +113,15 @@ class OpenEyes < Processing::App
             text_align(LEFT, TOP)
             #text("c:"+col.to_s+" "+"r:"+row.to_s+" "+"z:"+@zoom.to_s, col*256, row*256)
             #text("c:"+col.to_s+" "+"r:"+row.to_s+" "+"z:"+@zoom.to_s, col*256.to_s, row*256.to_s)
+            text("c:"+col.to_s+" "+"r:"+row.to_s+" "+"z:"+@zoom.to_s, col*256, row*256)
           end
         end
         fill(250, 0, 90)
         aloc = latlon2loc( 15.640891, 32.485199, @zoom, false )
-        @drawQueue.each do |img|
-          img.render
+        if (@drawQueue[@zoom])
+          @drawQueue[@zoom].each do |img|
+            #img.render
+          end
         end
         rect(aloc.x*256, aloc.y*256, 25, 25)
       pop_matrix
@@ -160,16 +164,39 @@ class OpenEyes < Processing::App
       end
     elsif (key == '+' || key == '=') 
       @sc *= 1.05
+      check_level(@zoom, @sc)
     elsif (key == '_' || key == '-' && @sc > 0.1) 
       @sc *= 1.0/1.05
-      puts @sc
+      check_level(@zoom, @sc)
     elsif (key == ' ') 
-      set_center(@start_loc.x, @start_loc.y, @zoom)
+      set_center(@start_loc.x, @start_loc.y, 7)
     elsif (key == 'z')
-      puts("@zoom is ", @zoom).to_s 
+      puts "z"
     end
   end
-
+  
+  def check_level(z, s)
+    l = log(s) / log(2)
+    if (l < z-0.35)
+      puts "lower than zoom: " << l.to_s
+      deref(z+1)
+      load_tiles(z-1)
+    elsif (l > z+0.35)
+      puts "higher than zoom: " << l.to_s
+      deref(z-1)
+      load_tiles(z+1)
+    end
+  end
+  
+  def deref(lvl)
+    if (@drawQueue[lvl])
+      @drawQueue[lvl].each do |img|
+        #img = nil
+      end
+      #@drawQueue[lvl]=nil
+    end
+  end
+  
   def mouseDragged 
     dx = (mouseX - pmouseX) / @sc
     dy = (mouseY - pmouseY) / @sc
