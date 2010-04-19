@@ -3,22 +3,30 @@ $LOAD_PATH << 'library/'
 $LOAD_PATH << 'library/data/tiles/7/'
 $LOAD_PATH << 'library/data/tiles/8/'
 $LOAD_PATH << 'library/data/'
+$LOAD_PATH << 'library/peasycam'
+
 
 require 'library/tile.rb'
 
 class OpenEyes < Processing::App
   
-  load_libraries 'opengl'
+  load_libraries 'opengl', 'peasycam'
   include_package "javax.media.opengl"
+  import 'peasy'
   
   S_tile = Struct.new(:x, :y, :z, :path)
   
   def setup 
-    size 1024, 768#, OPENGL
+    size 1024, 768, OPENGL
+    #configure_camera 
+    no_smooth
     @zoom = 7
+    @sc = 1
     @loaded = false
     @start_loc = latlon2loc( 15.640891, 32.485199, @zoom, true )
-    puts @start_loc
+    @start_loc2 = latlon2loc( 15.640891, 32.485199, 2, true )
+    puts @start_loc2
+    @loc = @start_loc
     set_center(@start_loc.x, @start_loc.y, @zoom)
     @f = create_font("Helvetica", 16)
     text_font(@f)
@@ -30,10 +38,13 @@ class OpenEyes < Processing::App
       @list[lvl] = get_files(lvl)
     end
     @gridsize = 7
-    @drawQueue = {}
+    @visible_keys = []
+    @images = {}
+    @recent = {}
     #@drawQueue = Array.new(@gridsize)
     #@drawQueue.map! { |a| Array.new(@gridsize)}
     #puts @drawQueue
+    
   end
   
   def get_files(lvl)
@@ -44,8 +55,9 @@ class OpenEyes < Processing::App
   	     arr = entry.split(/x|y|z|.png/)
          arr.shift
          arr.push(entry)
-         t = S_tile.new(arr[0].to_i, arr[1].to_i, arr[2].to_i, arr[3])
-         list[arr[0]<<arr[1]] = t
+         #t = S_tile.new(arr[0].to_i, arr[1].to_i, arr[2].to_i, arr[3])
+         v =[arr[0].to_i,arr[1].to_i,arr[2].to_i]
+         list[v] = "../data/tiles/"<<arr[2]<<"/"<<arr[3]
       end
     end
     return list
@@ -54,60 +66,67 @@ class OpenEyes < Processing::App
   def draw 
     background(0)
     push_matrix
-    
+      #rotate(PI/1.0)
       translate(width/2, height/2)
       scale(@sc,@sc)
-      translate(@tx,@ty)
-
-       minX = screen_x(0,0)
-       minY = screen_y(0,0)
-       maxX = screen_x(256,256)
-       maxY = screen_y(256,256)
+      translate(@tx,@ty)       
+       
+       #
+       @minX = model_x(0,0,0)
+       @minY = model_y(0,0,0)
+       @maxX = model_x(256,256, 0)
+       @maxY = model_y(256,256, 0)
 
        @zoom = [10, [0, (log(@sc)/log(2)).round].max].min
      
        cols = pow(2,@zoom)
        rows = pow(2,@zoom)
-
+       
        # find the biggest box the screen would fit in, aligned with the map:
        screenMinX = 0
        screenMinY = 0
-       screenMaxX = width
-       screenMaxY = height
+       screenMaxX = 1024
+       screenMaxY = 768
        # TODO align this box!
 
        # find start and end columns
-       @minCol = (cols * (screenMinX-minX) / (maxX-minX)).floor
-       @maxCol = (cols * (screenMaxX-minX) / (maxX-minX)).ceil
-       @minRow = (rows * (screenMinY-minY) / (maxY-minY)).floor
-       @maxRow = (rows * (screenMaxY-minY) / (maxY-minY)).ceil
-    
+       #@minCol = (cols * (screenMinX-@minX) / (@maxX-@minX)).floor
+       #@maxCol = (cols * (screenMaxX-@minX) / (@maxX-@minX)).ceil
+       #@minRow = (rows * (screenMinY-@minY) / (@maxY-@minY)).floor
+       #@maxRow = (rows * (screenMaxY-@minY) / (@maxY-@minY)).ceil
        
-       @minCol = constrain(@minCol, 0, cols);
-       @maxCol = constrain(@maxCol, 0, cols);
-       @minRow = constrain(@minRow, 0, rows);
-       @maxRow = constrain(@maxRow, 0, rows);
+       @minCol = (@loc.x-3) #* factor
+       @maxCol = (@loc.x+3) #* factor
+       @minRow = (@loc.y-3) #* factor
+       @maxRow = (@loc.y+3) #* factor
        
-       if(!@loaded)
-         load_tiles
-       end
+       @minCol = constrain(@minCol, 0, cols)
+       @maxCol = constrain(@maxCol, 0, cols)
+       @minRow = constrain(@minRow, 0, rows)
+       @maxRow = constrain(@maxRow, 0, rows)
+       
+       @visible_keys = []
        
       push_matrix
-        scale(1.0/pow(2,@zoom))
+        scale(1.0/ 2**@zoom)
         for col in ( @minCol..@maxCol )
           for row in ( @minRow..@maxRow )
-            hash = col.to_s << row.to_s
-            fill(col >= 0 && col < cols && row >= 0 && row < rows ? 128 : 80)
-            stroke(255)
-            rect(col*256,row*256,256,256)
-            fill(255)
-            noStroke
-            text_align(LEFT, TOP)
-            #text("c:"+col.to_s+" "+"r:"+row.to_s+" "+"z:"+@zoom.to_s, col*256, row*256)
-            #text("c:"+col.to_s+" "+"r:"+row.to_s+" "+"z:"+@zoom.to_s, col*256.to_s, row*256.to_s)
+            @visible_keys.push([col, row, @zoom])
             text("c:"+col.to_s+" "+"r:"+row.to_s+" "+"z:"+@zoom.to_s, col*256, row*256)
-            if (@drawQueue[hash])
-              @drawQueue[hash].render
+            v = [col, row, @zoom]
+            if(@list[v[2]])
+              if(!@images.has_key?(v) && @list[v[2]][v])
+                get_image(v)
+              else
+                #puts @images.keys
+                if(@images[v])
+                  image(@images[v], col*256, row*256 )
+                  if(!@recent.has_key?(v))
+                    @recent[v] = @images[v]
+                  end
+                  #puts @recent.size
+                end
+              end
             end
           end
         end
@@ -116,43 +135,34 @@ class OpenEyes < Processing::App
         rect(aloc.x*256, aloc.y*256, 25, 25)
       pop_matrix
     pop_matrix
-    fill(250, 0, 90)
-    text("zoom:"<<@zoom.to_s<<" "<<"scale:"<<@sc.to_s<<" "<<"minCol"<<@minCol.to_s<<" "<<"maxCol"<<@maxCol.to_s, 5, 5)
-  end
-  
-  def load_tiles
-    for col in ( @minCol..@maxCol )
-      for row in ( @minRow..@maxRow )
-        hash = col.to_s << row.to_s
-        if(@list[@zoom][hash] && !@drawQueue[hash])
-          s = @list[@zoom][hash]
-          @drawQueue[hash] = Tile.new(s.x, s.y, s.z, s.path)
-        end
-      end
+    if(@recent.size > 60)
+      @images.replace(@recent)
+      @recent.clear
     end
-    low = (@minCol.to_s << @minRow.to_s).to_i
-    high = (@maxCol.to_s << @maxRow.to_s).to_i
-    @drawQueue.delete_if { |key, value| key.to_i < low || key.to_i > high} 
-    puts @drawQueue
-    @loaded = true
-    #puts @list[lvl]
-    #puts @list[lvl][7154.to_s]
-    #@drawQueue[lvl]=nil
-    #if(zoom = 7||8)
-    #  @drawQueue[lvl]=Array.new
-    #  for s in @list[lvl]
-    #    puts s
-    #    t = Tile.new(s.x, s.y, s.z, s.path)
-    #    @drawQueue[lvl].push(t)
-    #  end
-    #end
+    fill(250, 0, 90)
+    text("zoom:"<<@zoom.to_s<<" "<<"scale:"<<@sc.to_s<<" "<<"minCol"<<@minCol.to_s<<" "<<"minRow"<<@minRow.to_s<<" "<<"maxCol"<<@maxCol.to_s<<" "<<"maxRow"<<@maxRow.to_s<<" "<<"minX"<<@minX.to_s<<" "<<"maxX"<<@maxX.to_s, 15, 15)
   end
   
+  def configure_camera
+    cam = PeasyCam.new(self, 800)
+    cam.set_minimum_distance(400)
+    cam.set_maximum_distance(5000)
+  end
   
+  def get_image(v)
+    path = @list[v[2]][v]
+    img = PImage.new
+    t = Thread.new { 
+      img = load_image(path)    
+    }
+    t.join
+    @images[v] = img
+  end
+    
   def set_center(x, y, z)
 		@sc = 2.0**z-1 
-		@tx = -256 * x / @sc;
-		@ty = -256 * y / @sc;
+		@tx = -256 * x / @sc
+		@ty = -256 * y / @sc
 	end
 	
 	def latlon2loc(lat, lon, zoom, tile)
@@ -161,6 +171,7 @@ class OpenEyes < Processing::App
     lon = radians(lon)
     xtile = 1 + lon / Math::PI
     ytile = 1 - log(tan(lat) + (1 / cos(lat))) / Math::PI
+    #puts "xtile: "<<xtile.to_s<<" ytile: "<<ytile.to_s
     if tile
       return PVector.new((xtile * factor).to_i, (ytile * factor).to_i)
     else
@@ -169,34 +180,59 @@ class OpenEyes < Processing::App
   end
   
   def key_pressed 
-    if (key == CODED) 
+    if (key == CODED)
+      
       if (keyCode == LEFT) 
-        @tx += 15
+        @tx += 0.15
+        #@loc = get_cent(@tx, @ty, @sc, @zoom)
+        @loc = PVector.new(@loc.x-0.15,@loc.y,@loc.z)
+        #set_center(@loc.x, @loc.y, @zoom)
       elsif (keyCode == RIGHT) 
-        @tx -= 15        
+        @tx -= 0.15
+        @loc = PVector.new(@loc.x+0.15,@loc.y,@loc.z)
+        #@loc = get_cent(@tx, @ty, @sc, @zoom)
       end
-    elsif (key == '+' || key == '=') 
+    elsif (key == '+' || key == '=')
+      pz = @zoom 
       @sc *= 1.05
-      load_tiles
-      check_level(@zoom, @sc)
+      puts ["prev zoom", pz, "", "curr zoom", @zoom].to_s
+      #@loc = get_cent(@tx, @ty, @sc, @zoom)
+      check_level(@zoom, @sc, @loc.x, @loc.y)
     elsif (key == '_' || key == '-' && @sc > 0.1) 
       @sc *= 1.0/1.05
-      load_tiles
-      check_level(@zoom, @sc)
+      #@loc = get_cent(@tx, @ty, @sc, @zoom)
+      check_level(@zoom, @sc, @loc.x, @loc.y)
     elsif (key == ' ') 
       set_center(@start_loc.x, @start_loc.y, 7)
+      @loc = get_cent(@tx, @ty, @sc, @zoom)
     elsif (key == 'z')
       puts "z"
     end
   end
   
-  def check_level(z, s)
+  def get_cent(tx, ty, sc, z)
+		column = (ty * sc / -256).round
+		row = (tx * sc / -256).round
+		puts [row, " ", column].to_s
+		return PVector.new(row, column, z)
+	end
+  
+  def zoom_plus(x,y,z)
+    basic = 2**z-1
+    
+  end
+  
+  def check_level(z, s, x, y)
     l = log(s) / log(2)
-    if (l < z-0.35)
+    if (l < z-0.5)
+      @loc = PVector.new(x/2,y/2,z-1)
+      #@loc = get_cent(@tx, @ty, @sc, @zoom)
       puts "lower than zoom: " << l.to_s
       #deref(z+1)
       #load_tiles(z-1)
-    elsif (l > z+0.35)
+    elsif (l > z+0.5)
+      @loc = PVector.new(x*2,y*2,z+1)
+      #@loc = get_cent(@tx, @ty, @sc, @zoom)
       puts "higher than zoom: " << l.to_s
       #deref(z-1)
       #load_tiles(z+1)
@@ -208,7 +244,6 @@ class OpenEyes < Processing::App
     dy = (mouseY - pmouseY) / @sc
     @tx += dx
     @ty += dy
-    load_tiles
   end
   
 end
