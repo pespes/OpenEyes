@@ -10,7 +10,9 @@ $LOAD_PATH << 'library/data/tiles/8/'
 $LOAD_PATH << 'library/data/'
 $LOAD_PATH << 'library/peasycam'
 
-require 'library/coucher.rb'
+require 'json/pure'
+require 'net/http'
+require 'library/tile.rb'
 
 class OpenEyes < Processing::App
   
@@ -35,7 +37,7 @@ class OpenEyes < Processing::App
     set_center(@start_loc.x, @start_loc.y, @zoom)
     @f = create_font("Helvetica", 16)
     text_font(@f)
-    @originalMatrix = PMatrix3D.new(self.getMatrix)
+    #@originalMatrix = PMatrix3D.new(self.getMatrix)
     
     #Tile Management
     @list = {}
@@ -54,7 +56,20 @@ class OpenEyes < Processing::App
     #puts @drawQueue
     
   end
-    
+  
+  def get_couch_locs
+    url = URI.parse('http://localhost:5984/flights/_design/all_latlong/_view/allgeo')
+    req = Net::HTTP::Get.new(url.path)
+    res = Net::HTTP.start(url.host, url.port) {|http|
+    http.request(req)
+    }
+    json = JSON.parse(res.body)
+    json["rows"].each do |row|
+      loc = PVector.new(row["value"]["lat"].to_f, row["value"]["long"].to_f, 0)
+      @markers.push(loc)
+    end
+  end
+  
   def get_files(lvl)
 	  list = {}
 	  dir = "data/tiles/"<<lvl.to_s
@@ -80,7 +95,7 @@ class OpenEyes < Processing::App
       translate(width/2, height/2, 0)
       fill(250, 0, 90)
 
-      scale(@sc, @sc, 1.0)
+      scale(@sc, @sc)
       translate(@tx,@ty, -100)       
        #
        @minX = model_x(0,0,0)
@@ -119,7 +134,17 @@ class OpenEyes < Processing::App
        @visible_keys = []
        
       push_matrix
-        scale(1.0/ 2**@zoom, 1.0/ 2**@zoom, 1.0)
+      @markers.each do |marker|
+        push_matrix
+        mrk = latlon2loc(marker.x, marker.y, @zoom, false)
+        translate(mrk.x*256-12.5, mrk.y*256-12.5, 100)
+        sphere_detail(4)
+        sphere(10)
+        #box(20)
+        #rect(mrk.x*256-12.5, mrk.y*256-12.5, 25, 25)
+        pop_matrix
+      end
+        scale(1.0/ 2**@zoom)
         for col in ( @minCol..@maxCol )
           for row in ( @minRow..@maxRow )
             @visible_keys.push([col, row, @zoom])
@@ -140,21 +165,12 @@ class OpenEyes < Processing::App
             end
           end
         end
-        @markers.each do |marker|
-          push_matrix
-            mrk = latlon2loc(marker.x, marker.y, @zoom, false)
-            translate(mrk.x*256, mrk.y*256, 30)
-            sphere_detail(5)
-            sphere(10)
-            line(0, 0, -30, 0, 0, 0)
-          pop_matrix
-        end
+
       pop_matrix
     pop_matrix
-    begin_hud
-       textAlign(TOP, LEFT)
-       text("zoom:"<<@zoom.to_s<<" "<<"scale:"<<@sc.to_s<<" "<<"minCol"<<@minCol.to_s<<" "<<"minRow"<<@minRow.to_s<<" "<<"maxCol"<<@maxCol.to_s<<" "<<"maxRow"<<@maxRow.to_s<<" "<<"minX"<<@minX.to_s<<" "<<"maxX"<<@maxX.to_s, -600,-400)
-    end_hud
+    #begin_hud
+    #   text("zoom:"<<@zoom.to_s<<" "<<"scale:"<<@sc.to_s<<" "<<"minCol"<<@minCol.to_s<<" "<<"minRow"<<@minRow.to_s<<" "<<"maxCol"<<@maxCol.to_s<<" "<<"maxRow"<<@maxRow.to_s<<" "<<"minX"<<@minX.to_s<<" "<<"maxX"<<@maxX.to_s, -600,-400)
+    #end_hud
     if(@recent.size > 40)
       @images.replace(@recent)
       @recent.clear
@@ -265,19 +281,19 @@ class OpenEyes < Processing::App
     #@ty += dy
   end
   
-  def begin_hud
-		push_matrix
-		hint(DISABLE_DEPTH_TEST)
+  #def begin_hud
+	#	push_matrix
+	#	hint(DISABLE_DEPTH_TEST)
 		#Load the identity matrix.
-		reset_matrix
+	#	reset_matrix
 		#Apply the original Processing transformation matrix.
-  	apply_matrix(@originalMatrix);
-  end
+	#	apply_matrix(@originalMatrix);
+  #end
 	
-	def end_hud
-		hint(ENABLE_DEPTH_TEST)
-		pop_matrix
-	end
+	#def end_hud
+	#	hint(ENABLE_DEPTH_TEST)
+	#	pop_matrix
+	#end
   
 end
 
